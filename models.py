@@ -162,11 +162,12 @@ class Unet(nn.Module):
         
         curr_res = in_resolution
         in_ch = ch
+        skip_ch = []
         for i in range(len(ch_mult)):
             out_ch = ch*ch_mult[i]
             for j in range(num_res_blocks):
                 self.contracting_path.append(ResBlock( in_ch=in_ch, out_ch=out_ch, temb_dim=temb_dim, dropout=dropout))
-                
+                skip_ch.append(out_ch)
                 #update in channel to out ch after first resnet block
                 in_ch = out_ch  
                 # if current resolution is in attn_res array, add an attention block
@@ -183,15 +184,16 @@ class Unet(nn.Module):
         self.middle.append(AttnBlock(chs = out_ch))
         self.middle.append(ResBlock( in_ch=out_ch, out_ch=out_ch, temb_dim=temb_dim, dropout=dropout))
         
-        
+        curr_res = in_resolution // (2 ** (len(ch_mult)-1))
+
         #Up path
         self.expanding_path = nn.ModuleList()
         
         for i in range(len(ch_mult)-1, -1, -1): 
-            in_ch = out_ch*2  #initially the input channel will have not only the output of the previous block but also the skip (usually the same number of channes)
+            in_ch = out_ch  
             out_ch = ch_mult[i]*ch 
             for j in range(num_res_blocks):
-                self.expanding_path.append(ResBlock( in_ch=in_ch, out_ch=out_ch, temb_dim=temb_dim, dropout=dropout))
+                self.expanding_path.append(ResBlock( in_ch=in_ch+skip_ch.pop(), out_ch=out_ch, temb_dim=temb_dim, dropout=dropout))
                 in_ch = out_ch
                 if curr_res in attn_res:
                     self.expanding_path.append(AttnBlock(chs = out_ch))
