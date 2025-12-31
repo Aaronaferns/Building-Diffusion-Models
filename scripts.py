@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 
 
-device = device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 def saveCheckPoint(save_folder, exp_no, step, model, optimizer, loss_list):
     save_dir = save_folder
@@ -36,7 +36,7 @@ def train(model, dataLoader, optimizer, loss_fn, num_steps, save_interval, save_
     loss_list = []
     for step in pbar:
         X0, _ = next(data_iter)
-        loss = diffusionTrainStep(model, optimizer, loss_fn, X0)
+        loss = diffusionTrainStep(model, optimizer, loss_fn, X0, device)
         loss_list.append(loss)
         if (step > 0 and step%save_interval == 0 ) or step == num_steps-1:
             saveCheckPoint(
