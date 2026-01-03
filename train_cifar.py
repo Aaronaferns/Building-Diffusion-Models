@@ -5,12 +5,10 @@ import torch
 import matplotlib.pyplot as plt
 from scripts import train
 import torch.nn.functional as F
-from metrics import compute_real_stats
 
 def main():
     
     device = device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
-    real_mu, real_sigma = compute_real_stats(device=device, n_real=50000, batch_size=128)
     
     model = Unet(
         in_resolution = 32,  # CIFAR-10 images are 32x32
