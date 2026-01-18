@@ -7,8 +7,9 @@ from scripts import train
 import torch.nn.functional as F
 from ema import EMA
 def main():
+    is_windows = True
     
-    device = device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+    device = device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     model = Unet(
         in_resolution = 32,  # CIFAR-10 images are 32x32
@@ -19,20 +20,20 @@ def main():
         temb_dim = 256,
         attn_res = set([16]),  # Attention at lower resolutions for 32x32
         dropout = 0.1,
-        resam_with_conv=True,
         ch_mult=[1,2,4,8]
         )
 
     model = model.to(device)
     ema = EMA(model, decay=0.9999, device=device)
-    dataLoader = make_cifar10_train_loader()
+    if is_windows: dataLoader = make_cifar10_train_loader(num_workers=0, pin_memory=False)
+    else: dataLoader = make_cifar10_train_loader()
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, betas=(0.9, 0.999), weight_decay=0.0 )
     loss_fn = F.mse_loss
-    NUM_TRAIN_STEPS = 1000
+    NUM_TRAIN_STEPS = 1
     exp_no = 1
     save_interval = 100
     save_folder = "saves"
-    loss_list = train(model, dataLoader, optimizer, loss_fn, NUM_TRAIN_STEPS, save_interval, save_folder, exp_no)
+    loss_list = train(model, ema,dataLoader, optimizer, loss_fn, NUM_TRAIN_STEPS, save_interval, save_folder, exp_no, device)
     
     plt.figure()
     plt.plot(loss_list)

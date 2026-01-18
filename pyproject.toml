@@ -1,0 +1,15 @@
+[project]
+name = "building-diffusion-models"
+version = "0.1.0"
+description = "Diffusion models from scratch in PyTorch"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+  "torch",
+  "torchvision",
+  "tqdm",
+  "numpy",
+  "matplotlib",
+  "einops",
+]
