@@ -5,7 +5,7 @@ import torch
 import matplotlib.pyplot as plt
 from scripts import train
 import torch.nn.functional as F
-
+from ema import EMA
 def main():
     
     device = device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
@@ -24,6 +24,7 @@ def main():
         )
 
     model = model.to(device)
+    ema = EMA(model, decay=0.9999, device=device)
     dataLoader = make_cifar10_train_loader()
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, betas=(0.9, 0.999), weight_decay=0.0 )
     loss_fn = F.mse_loss

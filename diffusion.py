@@ -21,7 +21,7 @@ def forwardDiffusion(X0__BCHW):
     Xt_BCHW = torch.sqrt(ab) * X0__BCHW + torch.sqrt(1.0 - ab) * eps__BCHW
     return eps__BCHW, t__B, Xt_BCHW
 
-def diffusionTrainStep(model, optimizer, loss_fn, X0, device):
+def diffusionTrainStep(model,ema, optimizer, loss_fn, X0, device):
     X0__BCHW = X0.to(device)
     eps__BCHW, t__B, Xt_BCHW = forwardDiffusion(X0__BCHW)
     eps_pred__BCHW = model(Xt_BCHW, t__B)
@@ -30,6 +30,7 @@ def diffusionTrainStep(model, optimizer, loss_fn, X0, device):
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
+    ema.update(model)
     return loss.item()
 
 @torch.no_grad()
