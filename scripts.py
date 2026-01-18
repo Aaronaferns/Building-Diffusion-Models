@@ -28,14 +28,14 @@ def saveCheckPoint(save_folder, exp_no, step, model, optimizer, loss_list):
 
 
 
-def train(model, dataLoader, optimizer, loss_fn, num_steps, save_interval, save_folder, exp_no, device):
+def train(model, ema, dataLoader, optimizer, loss_fn, num_steps, save_interval, save_folder, exp_no, device):
     model.train()
     data_iter = cycle(dataLoader)
     pbar = tqdm(range(num_steps), desc="Training")
     loss_list = []
     for step in pbar:
         X0, _ = next(data_iter)
-        loss = diffusionTrainStep(model, optimizer, loss_fn, X0, device)
+        loss = diffusionTrainStep(model, ema, optimizer, loss_fn, X0, device)
         loss_list.append(loss)
         if (step > 0 and step%save_interval == 0 ) or step == num_steps-1:
             saveCheckPoint(
