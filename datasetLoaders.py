@@ -5,8 +5,8 @@ from torchvision import datasets, transforms
 def make_cifar10_train_loader(
     data_root="./data",
     batch_size=128,
-    num_workers=4,
-    pin_memory=True,
+    num_workers=4,  # Set to 0 for Windows to avoid multiprocessing memory issues
+    pin_memory=True,  # Disable pin_memory since we're not using GPU
     drop_last=True,
 ):
     tfm = transforms.Compose([
