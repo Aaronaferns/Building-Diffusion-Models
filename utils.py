@@ -2,7 +2,7 @@ import math
 import torch
 import os
 from torchvision.utils import make_grid, save_image
-
+import shutil
 
 
 
@@ -59,12 +59,55 @@ def save_forward_noising_preview(X0, alpha_bar, out_path, timesteps=(1, 10, 50, 
     save_image(grid, out_path)
     
 
+# @torch.no_grad()
+# def save_samples(model, sample_fn, out_path, n=10, shape=(3,32,32), device="cuda"):
+#     model.eval()
+#     C,H,W = shape
+#     x = sample_fn(model, B=n, C=C, H=H, W=W, device=device)  # returns (n,C,H,W)
+#     grid = make_grid(x, nrow=5, normalize=True, value_range=(-1, 1))
+#     os.makedirs(os.path.dirname(out_path), exist_ok=True)
+#     save_image(grid, out_path)
+#     model.train()
+    
 @torch.no_grad()
-def save_samples(model, sample_fn, out_path, n=10, shape=(3,32,32), device="cuda"):
+def save_samples(
+    model,
+    sampling_fn,
+    total=50_000,
+    batch_size=256,
+    steps=50,
+    eta=0.0,
+    image_size=32,
+    device="cuda",
+    fake_dir = "fid_fake",
+    
+):  
+    shutil.rmtree(fake_dir, ignore_errors=True)  # delete if exists
+    os.makedirs(fake_dir, exist_ok=True)         # recreate empty
+    n_batches = math.ceil(total / batch_size)
+    idx = 0
+
     model.eval()
-    C,H,W = shape
-    x = sample_fn(model, B=n, C=C, H=H, W=W, device=device)  # returns (n,C,H,W)
-    grid = make_grid(x, nrow=5, normalize=True, value_range=(-1, 1))
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    save_image(grid, out_path)
-    model.train()
+
+    for b in range(n_batches):
+        cur_bs = min(batch_size, total - idx)
+
+        # Sample in [-1, 1] or whatever your sampler returns
+        x = sampling_fn(
+            model=model,
+            shape=(cur_bs, 3, image_size, image_size),
+
+            n_steps=steps,
+            eta=eta,
+            device=device,
+        )
+
+        # Convert to [0,1] for save_image
+        x = (x.clamp(-1, 1) + 1) * 0.5
+
+        for i in range(cur_bs):
+            save_image(x[i], os.path.join(fake_dir, f"{idx:06d}.png"))
+            idx += 1
+
+        if (b + 1) % 10 == 0:
+            print("Saved", idx, "images")
