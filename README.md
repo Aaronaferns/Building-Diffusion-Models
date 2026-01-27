@@ -6,17 +6,19 @@
 
 A small, readable diffusion repository that starts with a **vanilla DDPM-style ε-prediction model** and gradually moves toward more modern diffusion systems (score-based modeling, improved samplers, stability tricks, and eventually Stable-Diffusion-like components) **in small additive increments with minimal architectural disruption**.
 
-This repo currently trains a **U-Net with timestep embeddings and selective self-attention** on **CIFAR-10 (32×32)** and performs ancestral sampling from pure Gaussian noise.
+This repo currently trains a **U-Net with timestep embeddings and selective self-attention** on **CIFAR-10 (32×32)**.
 
 ![Forward diffusion](images/forward_noising.png)
 
 Core components include:
 
 * CIFAR-10 dataloader with normalization to **[-1, 1]**
-* Forward diffusion, training step, and ancestral sampling loop
 * U-Net backbone with ResBlocks, GroupNorm, timestep embeddings, and attention
-* Training script with checkpointing and loss visualization
 * Sinusoidal timestep embedding utilities
+* EMA model 
+* Training script with checkpointing and loss visualization
+* Fréchet Inception Distance (FID) calculation and reporting after every 10,000 training steps
+
 
 ---
 
@@ -93,15 +95,39 @@ model(x_t, t) → ε̂
 This allows objective and sampler upgrades without redesigning the backbone.
 
 ---
+### EMA (Exponential Moving Average):
+
+* A EMA of the model is kept and this is used for sampling. This gives more stable samples.
+
+---
 
 ### Sampling
 
-Sampling follows standard ancestral DDPM reverse diffusion:
+Standard ancestral DDPM reverse diffusion:
 
 * Initialize `x_T ~ N(0, I)`
 * Iterate `t = T−1 … 0`
 * Compute DDPM posterior mean from ε-prediction
 * Add noise at all steps except `t = 0`
+
+
+DDIM (Denoising Diffusion Implicit Models) reverse diffusion:
+
+- Initialize the sample with Gaussian noise:
+  - `x_T ~ N(0, I)`
+- Use a reduced set of timesteps sampled from the full diffusion chain.
+- At each timestep:
+  - Predict noise `ε̂ = ε_θ(x_t, t)`
+  - Estimate the clean image `x̂_0`
+  - Update the sample deterministically (η = 0) or stochastically (η > 0)
+- No noise is added when `η = 0`, resulting in deterministic sampling.
+
+**Notes**
+- `η = 0` → deterministic DDIM (fast, non-ancestral)
+- `η > 0` → stochastic DDIM (interpolates toward DDPM)
+- Same training objective as DDPM
+
+Returns the final denoised sample `x_0`.
 
 ---
 
@@ -111,27 +137,37 @@ Below are samples generated via ancestral DDPM sampling from pure noise using th
 
 #### warm-up training (~5k steps)
 
-![Samples at 5k steps](images/samples_step_5k.png)
+<!-- ![Samples at 5k steps](images/samples_step_5k.png) -->
+<img src="images/samples_step_5k.png" width="500">
 
+#### FID stabilizes (~50k steps, FID ~ 25)
+<!-- ![Samples at 50k steps](images/image_grid.png) -->
+<img src="images/image_grid.png" width="500">
 ---
 
 ### Training Dynamics
 
-![Training loss curve](images/loss_curve.png)
+<!-- ![Training loss curve](images/loss_curve.png) -->
+<img src="images/loss_curve.png" width="500">
 
 The training loss decreases steadily, indicating stable ε-prediction optimization under the linear noise schedule.
 
-If available, loss can also be analyzed by timestep bucket to assess whether learning is balanced across the diffusion horizon.
+<!-- ![FID curve](images/fid_plot.png) -->
+<img src="images/fid_plot.png" width="500">
+
+The FID score progression over training steps. Lowest FID ~20 after 100,000 steps.
 
 ---
 
 ## Repository Structure
 
 * `datasetLoaders.py` — CIFAR-10 dataloader and preprocessing
-* `diffusion.py` — schedules, forward diffusion, training step, samplers
+* `diffusion.py` — schedules, forward diffusion, training step, samplers (Ancestral and DDIM)
 * `models.py` — U-Net, ResBlocks, attention, up/downsampling blocks
 * `utils.py` — timestep embeddings, sample saving, visualization helpers
-* `scripts.py` — training entry point, checkpointing, loss plotting
+* `scripts.py` — training entry point, checkpointing, loss plotting, evaluation helpers
+* `ema.py` — EMA class and Helpers
+* `train_cifar.py` — Train script for CIFAR 10 dataset, implements checkpointing, FID tracking, and EMA model.
 
 ---
 
@@ -140,7 +176,9 @@ If available, loss can also be analyzed by timestep bucket to assess whether lea
 ### 1) Install dependencies
 
 ```bash
-pip install torch torchvision einops tqdm matplotlib
+pip install uv
+# Go to project root and then
+uv sync
 ```
 
 ---
@@ -148,15 +186,16 @@ pip install torch torchvision einops tqdm matplotlib
 ### 2) Train
 
 ```bash
-python scripts.py
+python train_cifar.py
 ```
 
 This will:
 
 * download CIFAR-10 into `./data`
-* train for `NUM_TRAIN_STEPS` (default: 1000)
-* save checkpoints to `saves/<exp_no>/`
-* write a training loss plot `<exp_no>_loss_curve.png`
+* train indefinitely
+* save checkpoints to `working/<exp_no>/checkpoints` once every 10,000 train steps or till you quit
+* write a training loss plot and FID plot to  `working/<exp_no>/saves` once every 10,000 train steps
+
 
 ---
 
@@ -165,15 +204,18 @@ This will:
 Saved at:
 
 ```
-saves/<exp_no>/<step>_checkpoint.pt
+<exp_no>/heckpoints/
 ```
 
 Each checkpoint contains:
 
 * `step`
 * model `state_dict`
+* ema   `state_dict`
 * optimizer `state_dict`
 * loss history
+* FID history
+* best FID
 
 ---
 
@@ -181,7 +223,7 @@ Each checkpoint contains:
 
 The guiding principle is to keep `model(x_t, t)` stable and make most upgrades modular.
 
-### Phase 1: DDPM baseline hardening
+### Phase 1: DDPM baseline hardening (COMPLETED)
 
 * Exponential moving average (EMA) of model weights
 * Improved logging (CSV / JSON)
@@ -227,21 +269,14 @@ Contributions are welcome.
 
 ### Good starter contributions
 
-* EMA weights + EMA sampling
-* Sample grid saving during training
-* Resume-from-checkpoint support
-* DDIM sampler
-* Metrics logging utilities
+* EMA weights + EMA sampling (COMPLETED)
+* Sample grid saving during training (COMPLETED)
+* Resume-from-checkpoint support (COMPLETED)
+* DDIM sampler (COMPLETED)
+* Metrics logging utilities (FID ADDED)
 
 Open an issue first if you’re unsure — happy to discuss direction.
 
----
-
-## Notes
-
-* Default training runs are intentionally short; do not expect high-quality samples yet.
-* No EMA or DDIM enabled by default.
-* FID/KID not yet integrated.
 
 ---
 

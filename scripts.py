@@ -4,7 +4,7 @@
 
 from itertools import cycle
 from diffusion import diffusionTrainStep, sample
-from tqdm import tqdm
+import tqdm
 from utils import save_samples
 from cleanfid import fid
 
@@ -16,11 +16,11 @@ import torch.nn.functional as F
 
 
 
-best_fid = float("inf")
 
 
-def save_ckpt(model, ema, optimizer, step, loss_list, ckpt_dir, fid_list, fid_value = None):
-    global best_fid
+
+def save_ckpt(model, ema, optimizer, step, loss_list, ckpt_dir, fid_list, best_fid = None,  fid_value = None):
+
     os.makedirs(ckpt_dir, exist_ok=True)
 
     last_path = os.path.join(ckpt_dir, "last.pt")
@@ -33,15 +33,16 @@ def save_ckpt(model, ema, optimizer, step, loss_list, ckpt_dir, fid_list, fid_va
         "optim": optimizer.state_dict(),
         "fid_list": fid_list,
         "losses": loss_list,
+        "best_fid" :best_fid,
     }
     torch.save(ckpt, last_path)
-    if fid_value is not None and fid_value < best_fid:
+    if fid_value is not None and best_fid is not None and fid_value < best_fid:
         best_fid = fid_value
         ckpt["best_fid"] = best_fid
         torch.save(ckpt, best_path)
         print("Saved new best_fid:", best_fid)
 
-
+    return best_fid
 
 def train(
     main_dir,
@@ -60,12 +61,15 @@ def train(
     fid_warmup_steps=5000,
     fid_interval_N = 50000,
     fid_interval_n = 10000,
+    loss_list = [],
+    fid_list = [],
+    best_fid = float('inf')
 ):
     
     #directories
     ckpt_dir1 = main_dir + f"/{exp_no}/" + ckpt_dir 
     save_dir1 = main_dir + f"/{exp_no}/" + save_dir 
-    fdir1 = main_dir +"/" + real_dir
+    fdir1 = main_dir +"/" + real_dir 
     fdir2 = main_dir + f"/{exp_no}/" + sample_dir 
     
     
@@ -74,9 +78,10 @@ def train(
     data_iter = cycle(dataLoader)
     pbar = tqdm.tqdm(total=None, desc="Training", dynamic_ncols=True)
 
-    loss_list = []
-    fid_list = []  
+    loss_list = loss_list
+    fid_list = fid_list
     step = start_step
+    best_fid = best_fid
     
     try:
         while True:
@@ -111,7 +116,7 @@ def train(
                                 fake_dir = fdir2,
                                     
                                 )
-                    fid_score = fid.compute_fid(fdir1+"real_hard", fdir2, device=device,
+                    fid_score = fid.compute_fid(fdir1+"/real_hard", fdir2, device=device,
                                         num_workers=0,     
                                         batch_size=64,      
                                         use_dataparallel=False,)
@@ -129,7 +134,7 @@ def train(
                                 fake_dir = fdir2,
                                     
                                 )
-                    fid_score = fid.compute_fid(fdir1+"real_soft", fdir2, device=device,
+                    fid_score = fid.compute_fid(fdir1+"/real_soft", fdir2, device=device,
                                                     num_workers=0,     
                                                     batch_size=64,      
                                                     use_dataparallel=False,)
@@ -140,7 +145,7 @@ def train(
                 fid_list.append((step, float(fid_score)))
                 pbar.write(f"[FID] step={step}  fid={fid_score:.4f}  ({dt:.1f}s)")
                 pbar.set_postfix(loss=f"{loss:.4f}", step=step, fid=f"{fid_score:.3f}")
-                save_ckpt(model, ema, optimizer, step,loss_list, ckpt_dir1, fid_list = fid_list, fid_value=fid_score)
+                best_fid = save_ckpt(model, ema, optimizer, step,loss_list, ckpt_dir1, fid_list = fid_list, best_fid=best_fid, fid_value=fid_score )
                 save_loss_fid_plots(
                     ckpt_dir1,
                     save_dir1,
@@ -184,7 +189,7 @@ def evaluate_fid(
                     
                 )
     fid_score = fid.compute_fid(
-                            fdir1+"real_hard", 
+                            fdir1+"/real_hard", 
                             fdir2, device=device,
                             num_workers=0,     
                             batch_size=64,      
@@ -209,28 +214,59 @@ def save_loss_fid_plots(
         if os.path.exists(path):
             os.remove(path)
             
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
+    ckpt = torch.load(checkpoint_path+"/last.pt", map_location="cpu", weights_only=False)
 
     best_fid = ckpt.get("best_fid")
     loss_list = ckpt.get("losses")
     fid_list = ckpt.get("fid_list")
     
-    # ---- Loss plot ----
-    plt.figure()
-    plt.plot(loss_list)
-    plt.xlabel("Training step")
-    plt.ylabel("MSE loss")
-    plt.title(f"DDPM Training Loss (best FID: {best_fid:.4f})")
-    plt.savefig(loss_plot_path, dpi=200, bbox_inches="tight")
-    plt.close()
-    print(f"Saved loss plot to: {loss_plot_path}")
+    if best_fid is None: 
+        print("best fid is None. Setting to default 500")
+        best_fid = 500
+    if loss_list:
+        # ---- Loss plot ----
+        plt.figure()
+        plt.plot(loss_list)
+        plt.xlabel("Training step")
+        plt.ylabel("MSE loss")
+        plt.title(f"DDPM Training Loss (best FID: {best_fid:.4f})")
+        plt.savefig(loss_plot_path, dpi=200, bbox_inches="tight")
+        plt.close()
+        print(f"Saved loss plot to: {loss_plot_path}")
 
-    # ---- FID plot ----
-    plt.figure()
-    plt.plot(fid_list)
-    plt.xlabel("Training step")
-    plt.ylabel("FID")
-    plt.title(f"Fréchet Inception Distance (Best FID: {best_fid:.4f})")
-    plt.savefig(fid_plot_path, dpi=200, bbox_inches="tight")
-    plt.close()
-    print(f"Saved fid plot to: {fid_plot_path}")
+    if fid_list:
+        steps, fids = zip(*fid_list) 
+
+        plt.figure()
+        plt.plot(steps, fids, marker="o")
+        plt.xlabel("Training steps")
+        plt.ylabel("FID")
+        plt.title(f"Fréchet Inception Distance (Best FID: {best_fid:.4f})")
+        plt.savefig(fid_plot_path, dpi=200, bbox_inches="tight")
+        plt.close()
+
+        print(f"Saved fid plot to: {fid_plot_path}")
+    
+    
+
+def model_load_latest_state(*, exp_no, main_dir, ckpt_dir, model, optimizer, ema, device):
+    ckpt_path = main_dir + f"/{exp_no}/" + ckpt_dir + "/last.pt"
+    print(f"Loading checkpoint from {ckpt_path}")
+
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+
+    model.load_state_dict(ckpt["model"])
+    ema.ema.load_state_dict(ckpt["ema"])
+    optimizer.load_state_dict(ckpt["optim"])
+
+    start_step = ckpt.get("step", 0)
+    best_fid = ckpt.get("best_fid", float("inf"))
+    loss_list = ckpt.get("losses", [])
+    fid_list = ckpt.get("fid_list", [])
+    if best_fid is None:
+        best_fid = float("inf")
+    if fid_list is None:
+        fid_list = []
+    if loss_list is None:
+        loss_list = []
+    return start_step, best_fid, loss_list, fid_list
