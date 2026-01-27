@@ -1,5 +1,5 @@
 import torch
-from tqdm import tqdm
+import tqdm
 
 NUM_TIMESTEPS = 1000
 
@@ -63,3 +63,44 @@ def sample(model, B, C, H, W, device=None):
             x = mean
 
     return x.detach().cpu()
+
+@torch.no_grad()
+def ddim_sample(model, shape, n_steps=50, eta=0.0, device=None):
+    T = 1000
+    alpha_bar = ALPHA_BAR__T.to(device)  
+
+    times = torch.linspace(0, T - 1, n_steps, device=device).long().flip(0)
+
+    x = torch.randn(shape, device=device)
+
+    B = shape[0]
+
+    for i in range(n_steps):
+        t = times[i].item()
+        t_prev = times[i + 1].item() if i < n_steps - 1 else -1
+
+        t_batch = torch.full((B,), t, device=device, dtype=torch.long)
+
+        a_t = alpha_bar[t]                          
+        a_prev = torch.tensor(1.0, device=device) if t_prev < 0 else alpha_bar[t_prev]
+
+        eps = model(x, t_batch)                   
+
+      
+        x0 = (x - torch.sqrt(1.0 - a_t) * eps) / (torch.sqrt(a_t) + 1e-8)
+        x0 = x0.clamp(-1, 1)                       
+
+        
+        sigma = (
+            eta
+            * torch.sqrt((1.0 - a_prev) / (1.0 - a_t + 1e-8))
+            * torch.sqrt(torch.clamp(1.0 - a_t / (a_prev + 1e-8), min=0.0))
+        )
+
+        c = torch.sqrt(torch.clamp(1.0 - a_prev - sigma**2, min=0.0))
+
+        z = torch.randn_like(x) if (eta > 0 and t_prev >= 0) else 0.0
+
+        x = torch.sqrt(a_prev) * x0 + c * eps + sigma * z
+
+    return x
