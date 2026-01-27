@@ -1,7 +1,7 @@
 from models import Unet
 from datasetLoaders import make_cifar10_train_loader
 import matplotlib.pyplot as plt
-from scripts import train
+from scripts import train, model_load_latest_state
 import torch.nn.functional as F
 from ema import EMA
 from torchvision.transforms import ToPILImage
@@ -36,16 +36,30 @@ def load_real_cifar(data_dir, N, soft_N):
     print("saved hard real images to:", hard_real_dir)
 
 
+    
+
 def main():
     
-    N = 10000
-    soft_N = 5000
-    is_windows = True
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    main_dir = "/kaggle/working"
-    real_dir = "fid"
-    data_not_loaded = True
     
+    #settings
+    is_windows = False
+    N = 10_000
+    soft_N = 5_000
+    fid_warmup_steps=5_000
+    fid_interval_N=50_000
+    fid_interval_n=10_000
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    main_dir = "/scratch/aalefern/Building_Diffusion_Models/working"
+    real_dir = "fid"
+    ckpt_dir = "checkpoints"
+    sample_dir = "samples"
+    save_dir = "saves"
+    exp_no = 1
+    
+    
+   
+    # create and load model and ema of the model
     model = Unet(
         in_resolution = 32, 
         input_ch = 3,
@@ -60,34 +74,66 @@ def main():
 
     model = model.to(device)
     ema = EMA(model, decay=0.9999, device=device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, betas=(0.9, 0.999), weight_decay=0.0 )
+    loss_fn = F.mse_loss
+    
+    # Load latest model if saved model exists
+    start_step = 0
+    loss_list = fid_list = []
+    best_fid = float('inf')
+    
+    if os.path.exists(main_dir+f"/{exp_no}/"+ckpt_dir):
+        start_step, best_fid, loss_list, fid_list = model_load_latest_state(
+                                                                            exp_no = exp_no,
+                                                                            main_dir = main_dir, 
+                                                                            ckpt_dir=ckpt_dir, 
+                                                                            model = model, 
+                                                                            optimizer = optimizer, 
+                                                                            ema = ema, 
+                                                                            device = device
+                                                                            )
+        
+        print(f"Resumed from step {start_step}, best FID {best_fid:.4f}")
+    else:
+        print("No checkpoint found. Starting from scratch.")
     
     if is_windows: dataLoader = make_cifar10_train_loader(num_workers=0, pin_memory=False)
     else: dataLoader = make_cifar10_train_loader()
     
     
+    #Download the real data for FID calculation
+    if not os.path.exists(main_dir+"/"+real_dir): 
+        print("Cifar real data does not exist. Downloading...")
+        load_real_cifar(main_dir+"/"+real_dir, N, soft_N)
     
-    if data_not_loaded: load_real_cifar(main_dir+"/"+real_dir, N, soft_N)
+    
+    
+    #The fun part: Training
     
     train(  
             main_dir = main_dir,
-            start_step=0,
+            start_step=start_step,
             real_dir=real_dir,
-            sample_dir = "samples",
+            sample_dir = sample_dir,
             model = model, 
             ema=ema, 
             dataLoader=dataLoader,
-            optimizer=torch.optim.AdamW(model.parameters(), lr=2e-4, betas=(0.9, 0.999), weight_decay=0.0 ), 
-            loss_fn=F.mse_loss,
-            exp_no = 1,
+            optimizer=optimizer, 
+            loss_fn=loss_fn,
+            exp_no = exp_no,
             sampling_fn = ddim_sample,
             device = device,
             soft_N=soft_N,
-            ckpt_dir="checkpoints",
-            save_dir = "saves",
+            ckpt_dir=ckpt_dir,
+            save_dir = save_dir,
             hard_N=N,
-            fid_warmup_steps=5000,
-            fid_interval_N=50_000,
-            fid_interval_n=10_000
+            fid_warmup_steps=fid_warmup_steps,
+            fid_interval_N=fid_interval_N,
+            fid_interval_n=fid_interval_n,
+            loss_list = loss_list,
+            fid_list = fid_list,
+            best_fid = best_fid,
+            
         )
     
 
